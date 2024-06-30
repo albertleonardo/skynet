@@ -2410,8 +2410,8 @@ def execute(st,model,outname='skynet_picks.csv',threshold=0.5,stack=True,return_
             if return_preds:
                 all_preds.append(predictions)
 
-            #picks = extract_picks(predictions.detach().numpy(),threshold=threshold)
-            picks = extract_picks(predictions,threshold=threshold)
+            picks = extract_picks(predictions.detach().numpy(),threshold=threshold)
+            #picks = extract_picks(predictions,threshold=threshold)
             # this is not passing the pick scores, why?
             #print(picks)
             tdf = picks_to_df(tst,picks)

@@ -1,5 +1,5 @@
 # SKYNET
-Seismological Knowledge Yardstick NETworks
+**S**eismological **K**nowledge **Y**ardstick **NET**works
 
 A series of models for seismic phase picking at regional distances.
 

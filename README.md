@@ -1,7 +1,7 @@
 # SKYNET
 **S**eismological **K**nowledge **Y**ardstick **NET**works
 
-A series of models for seismic phase picking at regional distances.
+A series of deep learning models for seismic phase picking at regional distances.
 
 We trained intial models in the CREW dataset, details here: https://github.com/albertleonardo/CREW
 

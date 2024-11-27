@@ -27,7 +27,9 @@ import scipy.stats
 import numpy as np
 import pandas as pd
 import torch.nn as nn
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+
 from scipy import signal
 from scipy.signal import sosfilt,iirfilter
 from scipy.signal import zpk2sos, find_peaks
@@ -62,6 +64,12 @@ def open(fname):
 	data = f['data']
 	return data
 
+def load_model(modelname,mode='eval'):
+	if modelname=='regional_picker':
+		model=Regional_Picker(3)
+		model.load_state_dict(torch.load('skynet_models/500_CREW_complex_data_640',map_location='cpu'))
+		model.eval()
+	return model		
 
 def superposition(examples,delays,scalars=None):
 	"""
@@ -569,8 +577,10 @@ def create_noise_example(size):
     """
     creates a random noise waveform
     """
-    x = np.random.random(size)
+    #x = np.random.random(size)
     #x = torch.rand(size)
+    x = np.random.normal(size=size)
+    #x = x/np.max(np.abs(x))
     return x 
     
 def create_noise_with_spikes(size,n_spikes=10,max_amplitude=100):
@@ -591,7 +601,8 @@ def create_noise_with_spikes(size,n_spikes=10,max_amplitude=100):
     return x 
 
 def create_noise_sinusoid(size,freqmin=1,freqmax=10000,add_noise=False,noise_intensity=0.5):
-    t = np.arange(size[0])
+    rand_phase = np.random.randint(10000)
+    t = np.arange(size[0]) + rand_phase
     sinusoid = np.sin(2*np.pi*t*(freqmin/freqmax))
     #sinusoid = np.sin(t/freqmin)
     
@@ -623,6 +634,8 @@ def create_complex_noise(size):
     complex in the sense of complicated
     """
     # pure noise + multiple sines + multiple spikes + multiple shifts
+    seed = np.random.randint(10000)
+    np.random.seed(seed)
     x        = create_noise_example(size)
     n_spikes = np.random.randint(size[0]/1000)
     x        = x + create_noise_with_spikes(size,n_spikes=n_spikes)
@@ -630,10 +643,16 @@ def create_complex_noise(size):
     for i in range(0,n_sines):
         freqmax=np.random.randint(low=50,high=size[0])
         freqmin=np.random.randint(low=10,high=freqmax)
-        intensity = np.random.uniform(low=0.5,high=1)
+        intensity = np.random.uniform(low=0.15,high=0.75)
         x = x + create_noise_sinusoid(size,freqmax=freqmax,add_noise=True,noise_intensity=intensity)
         
     x = x/np.max(np.abs(x))
+    # randomly flip polarity
+    pol = np.random.rand()
+    #print(pol)
+    if pol>0.5:
+        x = x*-1
+
     return x
     
 
@@ -901,6 +920,75 @@ def plot_example_augmented(example,augmentation_x,augmentation_y,predictions,thr
 
 
     return fig
+
+def plot_augmentation(augmentation_x,augmentation_y,predictions,threshold=0.5):
+    traces=augmentation_x
+    length = traces.shape[-1]
+    
+    fig = plt.figure(figsize=(16,6),tight_layout=True)
+    gs  = gridspec.GridSpec(3,4)
+ 
+    if type(predictions)==np.ndarray:
+        #predictions = np.asarray(predictions)
+        #print(predictions)
+        p_picks,_ = find_peaks(predictions[0,:], distance=150,height=threshold,width=50)
+        s_picks,_ = find_peaks(predictions[1,:], distance=150,height=threshold,width=50) 
+    
+        ax = fig.add_subplot(gs[0:2,0:3])
+    for i in range(len(traces)):
+        plt.plot(traces[i]-i*2,linewidth=0.5,c='k')
+        #plt.text(length-1000,-i*2+0.3,example.attrs['channels'][i],bbox=dict(boxstyle="round",fc='white'))#+channels[i])
+       
+    try:
+        if len(p_picks)>0:
+            for p_pick in p_picks:
+                plt.axvline(p_pick,c='r')
+        if len(s_picks)>0:
+            for s_pick in s_picks:
+                plt.axvline(s_pick,c='b')
+    except Exception as e:
+        print(e)
+    plt.ylim(-6,2)
+    plt.yticks([])
+    plt.xlim(0,length)
+    plt.xticks(np.arange(0,length+1,3000),np.arange(0,length/100 + 1,30))
+    plt.xlabel('seconds')
+    
+    ax = fig.add_subplot(gs[2,0:3])
+    
+    label = augmentation_y
+    if label.shape[0]==1:
+        plt.plot(label[0,:],label='Label')
+    if label.shape[0]==3:
+        plt.plot(label[0,:],'r',linestyle='--',label='P label')
+        plt.plot(label[1,:],'b',linestyle='--',label='S label')
+        ax.fill_between(np.arange(0,length), label[0,:], 0, color='r', alpha=.09,zorder=0)
+        ax.fill_between(np.arange(0,length), label[1,:], 0, color='b', alpha=.09,zorder=0)
+        
+        
+    if predictions.shape[0]>1:
+        plt.plot(predictions[0,:],'r',label='P Predictions')
+        plt.plot(predictions[1,:],'b',label='S Predictions')
+        plt.xlim(0,length)
+        plt.xlabel('sample points')
+        
+    try:
+        if len(p_picks)>0:
+            for p_pick in p_picks:
+                plt.axvline(p_pick,c='r')
+        if len(s_picks)>0:
+            for s_pick in s_picks:
+                plt.axvline(s_pick,c='b')
+    except Exception as e:
+        print(e)
+    plt.ylim(-0.05,1.05)
+    plt.xlim(0,length)
+    plt.xlabel('sample points')
+
+    return fig
+
+
+
 
 def get_min_max_times(example):
     """
@@ -1373,6 +1461,35 @@ def create_multiphase_label(example,half_width=500,length=30000):
 
     return label
 
+
+
+def create_multiphase_label_aux(example,half_width=500,length=30000):
+    """
+    creates labels for the 4 phases Pn,Pg,Sn and Sg, when only the two first arrivals are labeled
+    """
+
+    pn,sn = get_first_arrivals(example,seisbench=False)
+    #pn = np.asarray(pn,dtype=float)
+    #if len(pn)>1:
+    #    pn = min(pn)    
+    pn = float(pn)
+    sn = float(sn)
+    #pn = example.attrs['Pn_arrival_sample']
+    #pg = example.attrs['Pg_arrival_sample']
+    #sn = example.attrs['Sn_arrival_sample']
+    #sg = example.attrs['Sg_arrival_sample']
+
+    label = torch.zeros((5,30000))
+    label[0,:] = generate_triangle(pn,half_width=half_width,length=length)
+    #label[1,:] = generate_triangle(pg,half_width=half_width,length=length)
+    label[2,:] = generate_triangle(sn,half_width=half_width,length=length)
+    #label[3,:] = generate_triangle(sg,half_width=half_width,length=length)
+    label[4,:] = 1 - label[0,:] - label[1,:] - label[2,:] - label[3,:]
+
+    label = torch.clamp(label,min=0,max=1)
+
+    return label
+
 def create_multiphase_batch(dataset,indices,half_width=500,filtered=False):
 
 
@@ -1396,6 +1513,27 @@ def create_multiphase_batch(dataset,indices,half_width=500,filtered=False):
     return x_batch,y_batch,names
 
 
+def create_multiphase_batch_aux(dataset,indices,half_width=500,filtered=False):
+
+
+    n_examples = len(indices)
+    y_batch = torch.zeros((n_examples,5,30000))
+    x_batch = torch.zeros((n_examples,3,30000))
+
+    names = []
+    names = list(dataset.keys())
+    for i,index in enumerate(indices):
+        example    = dataset[names[index]]
+        #print(example[()].shape)
+        temp_label = create_multiphase_label_aux(example,half_width=half_width)
+
+        y_batch[i,:,:] = temp_label
+        x_batch[i,:,:] = torch.from_numpy(example[()])
+        names.append(list(dataset.keys())[index])
+
+    #print(x_batch.shape,y_batch.shape)
+
+    return x_batch,y_batch,names
 
 def create_phasenet_batch(dataset,indices,std,filtered=False):
     """
@@ -1499,6 +1637,87 @@ def seisbench_batch_phasenet(dataset,indices,half_width):
 
     return x_batch,y_batch,names
 
+def col_augmentation(metadata,data):
+    # gather short distance arrivals
+
+    tdf   = metadata[metadata['path_ep_distance_deg']<0.6]
+    #print(len(metadata),len(tdf)) 
+    tnames = tdf['name'].to_list()
+
+    # get n random indices between 2 and 3
+    n_examples = np.random.randint(low=2,high=4)
+    
+    random_indices = np.random.randint(low=0,high=len(tnames),size=(n_examples,))
+    #print(random_indices)
+    
+    examples = []
+    for index in random_indices:
+        examples.append(data[tnames[index]])
+    
+    sp_times = []
+    p_samples = []
+    s_samples = []
+    labels = []
+    
+    for example in examples:
+        sp = example.attrs['trace_s_arrival_sample']-example.attrs['trace_p_arrival_sample']
+        sp_times.append(sp)
+        s_samples.append(example.attrs['trace_s_arrival_sample'])
+        p_samples.append(example.attrs['trace_p_arrival_sample'])
+        labels.append(generate_triangle_label(example,half_width=100,length=12000,seisbench=True).reshape((1,3,12000)))
+        
+        #print(example.attrs['trace_p_arrival_sample'],example.attrs['trace_s_arrival_sample'],sp)
+    
+    # random shift and stack
+    shifts = np.random.randint(low=200,high=500,size=(n_examples,))
+    flips = np.random.randint(0, 2,size=(n_examples,))
+    flips[flips==0]=-1
+    #print(flips)
+    amps = np.random.randint(1,10,size=(n_examples,))
+    #print(amps)
+    
+    if n_examples==2:
+    
+        x = examples[0][()]*flips[0]*amps[0] + (np.roll(examples[1],shift=shifts[0]+int(s_samples[0]),axis=-1))*flips[1]*amps[1]
+        # adjust the labels
+        y = labels[0] + np.roll(labels[1],shift=shifts[0]+int(s_samples[0]),axis=-1)
+        # normalize x
+        x = x/np.max(np.abs(x))
+    
+    
+        x_b = bandpass_data(x)
+        
+    elif n_examples==3:
+        x = examples[0][()]*flips[0]*amps[0] + amps[1]*flips[1]*np.roll(examples[1],shift=shifts[0]+int(s_samples[0]),axis=-1) + amps[2]*flips[2]*np.roll(examples[2],shift=shifts[1]+int(s_samples[1])+int(s_samples[0]),axis=-1)
+        y = labels[0] + np.roll(labels[1],shift=shifts[0]+int(s_samples[0]),axis=-1)+np.roll(labels[2],shift=shifts[1]+int(s_samples[1])+int(s_samples[0]),axis=-1)
+        x_b = bandpass_data(x)
+        x = x/np.max(np.abs(x))
+        x_b = x_b/np.max(np.abs(x_b))
+    
+    elif n_examples==4:
+        x = examples[0][()]*flips[0]*amps[0] + amps[1]*flips[1]*np.roll(examples[1],shift=shifts[0]+int(s_samples[0]),axis=-1) + amps[2]*flips[2]*np.roll(examples[2],shift=shifts[1]+int(s_samples[1])+int(s_samples[0]),axis=-1)+ amps[3]*flips[3]*np.roll(examples[3],shift=shifts[2]+int(s_samples[1])+int(s_samples[0])+int(s_samples[2]),axis=-1)
+        y = labels[0] + np.roll(labels[1],shift=shifts[0]+int(s_samples[0]),axis=-1)+np.roll(labels[2],shift=shifts[1]+int(s_samples[1])+int(s_samples[0]),axis=-1) + np.roll(labels[3],shift=shifts[2]+int(s_samples[1])+int(s_samples[0])+int(s_samples[2]),axis=-1)
+        x_b =skynet.bandpass_data(x)
+        x = x/np.max(np.abs(x))
+        x_b = x_b/np.max(np.abs(x_b))
+        
+        
+    return x,y,x_b
+
+
+def col_augmented_batch(metadata,data,size=10):
+    X = torch.zeros((size,3,12000))
+    Y = torch.zeros((size,3,12000))
+    for i in range(size):
+        x,y,xb=col_augmentation(metadata,data)
+        X[i,:,:] += x
+        Y[i,:,:] += y[0,:,:]
+    Y[:,2,:] = 1 - Y[:,0,:]-Y[:,1,:]
+       
+    return X,Y
+
+
+
 def batch_from_filename(filename,batch_size=20,half_width=500):
     data      = open(filename)
     len_data  = len(list(data.keys()))
@@ -1549,7 +1768,31 @@ def random_phasenet_t_batch(dataset,n,half_width):
 
     return x_batch,y_batch,names
 
-def plot_phasenet_example_predictions(example,predictions=False,picks=False,filtered=False,std=100,label_type='triangle',half_width=500,threshold=0.5,legend=True):
+
+def load_batch(dataset,indices):
+    
+    # determine the length from the dataset
+    names=list(dataset.keys())
+    example=dataset[names[0]]
+    out_size = example[()].shape
+
+    n_examples = len(indices)
+    x_batch = torch.zeros((n_examples,out_size[0],out_size[1]))
+
+    tnames = []
+
+    for i,index in enumerate(indices):
+        example    = dataset[names[index]]
+        x_batch[i,:,:] = torch.from_numpy(example[()])
+        tnames.append(names[index])
+
+    #print(x_batch.shape,y_batch.shape)
+
+    return x_batch,tnames
+
+
+
+def plot_phasenet_example_predictions(example,predictions=False,picks=False,labels=False,filtered=False,std=100,label_type='triangle',half_width=500,threshold=0.5,legend=True):
     """
     plots the waveforms along with predicitons and desired labels
     choose from gaussian for truncated gaussian labels
@@ -1652,18 +1895,22 @@ def plot_phasenet_example_predictions(example,predictions=False,picks=False,filt
     plt.yticks([]);plt.xticks([])
     plt.ylim(-6,2)
 
-    # create phasenet label
-    if label_type == 'gaussian':
-        label = create_phasenet_label(example,std=std)
-    if label_type == 'triangle':
-        label = generate_triangle_label(example,half_width=half_width).detach().numpy()
-
-    print('label shape',label.shape)
     ax = fig.add_subplot(gs[2,0:3])
-    plt.plot(label[0,:],label='P label',c='r',linestyle='--')
-    plt.plot(label[1,:],label='S label',c='b',linestyle='--')
-    ax.fill_between(np.arange(0,30000), label[0,:], 0, color='r', alpha=.09,zorder=0)
-    ax.fill_between(np.arange(0,30000), label[1,:], 0, color='b', alpha=.09,zorder=0)
+
+    if labels:
+
+        # create phasenet label
+        if label_type == 'gaussian':
+            label = create_phasenet_label(example,std=std)
+        if label_type == 'triangle':
+            label = generate_triangle_label(example,half_width=half_width).detach().numpy()
+
+        print('label shape',label.shape)
+        #ax = fig.add_subplot(gs[2,0:3])
+        plt.plot(label[0,:],label='P label',c='r',linestyle='--')
+        plt.plot(label[1,:],label='S label',c='b',linestyle='--')
+        ax.fill_between(np.arange(0,30000), label[0,:], 0, color='r', alpha=.09,zorder=0)
+        ax.fill_between(np.arange(0,30000), label[1,:], 0, color='b', alpha=.09,zorder=0)
 
     if type(predictions)==np.ndarray:
         plt.plot(predictions[0,:],label='P predictions',c='r')
@@ -1736,12 +1983,12 @@ def plot_seisbench_example_predictions(example,predictions=False,picks=False,fil
  
     # extract the picks
     # first if the array predictions are passed
-    print('change',predictions)
+    #print('change',predictions)
     if type(predictions)==np.ndarray:
         #predictions = np.asarray(predictions)
         #print(predictions)
-        p_picks,_ = find_peaks(predictions[0,:], distance=150,height=threshold,width=100) 
-        s_picks,_ = find_peaks(predictions[1,:], distance=150,height=threshold,width=100)
+        p_picks,_ = find_peaks(predictions[0,:], distance=150,height=threshold,width=50) 
+        s_picks,_ = find_peaks(predictions[1,:], distance=150,height=threshold,width=50)
     # second, pass the picks and plot them
     if picks:
        p_picks = picks[0]
@@ -1750,19 +1997,19 @@ def plot_seisbench_example_predictions(example,predictions=False,picks=False,fil
     ax = fig.add_subplot(gs[0:2,0:3])
     for i in range(len(traces)):
         plt.plot(traces[i]-i*2,linewidth=0.5,c='k')
-        plt.text(1000,-i*2+0.3,example.attrs['channels'][i],bbox=dict(boxstyle="round",fc='white'))#+channels[i])
+        plt.text(100,-i*2+0.8,example.attrs['channels'][i],bbox=dict(boxstyle="round",fc='white'))#+channels[i])
 
 
         if example.attrs['trace_p_arrival_sample'] != 0:
             pg_pos = example.attrs['trace_p_arrival_sample']
             plt.axvline(pg_pos,c='r',linestyle='--')
-            if i==0:plt.text(pg_pos-400,-5.2,'P',c='darkorange')
+            if i==0:plt.text(pg_pos-400,-5.2,'P',c='red')
                 
                 
         if example.attrs['trace_s_arrival_sample'] != 0:
             sg_pos = example.attrs['trace_s_arrival_sample']
             plt.axvline(sg_pos,c='b',linestyle='--')
-            if i==0:plt.text(sg_pos,-5.2,'S',c='b')                
+            if i==0:plt.text(sg_pos+150,-5.2,'S',c='b')                
 
     # add the predicted picks
     try:
@@ -1795,6 +2042,8 @@ def plot_seisbench_example_predictions(example,predictions=False,picks=False,fil
     plt.text(0,-3,'Origin Depth       = '+str(np.round(example.attrs['source_depth_km']/1000)))
     plt.text(0,-4,'Magnitude          = '+str(np.round(example.attrs['source_magnitude'],1)))
     plt.text(0,-5,'Distance             = '+str(np.round(example.attrs['path_ep_distance_deg'],2)) )
+    if filtered:
+        plt.text(0,-5.9,'Bandpassed',fontsize=16,color='red')
     
     plt.yticks([]);plt.xticks([])
     plt.ylim(-6,2)
@@ -1837,10 +2086,34 @@ def plot_seisbench_example_predictions(example,predictions=False,picks=False,fil
         print(e)
     plt.xlim(0,xlim)
     plt.xlabel('sample points')
-    #plt.legend()
-    if legend:
-       ax.legend(bbox_to_anchor=(1,1),ncol=2)
+    plt.legend(ncol=2,fontsize=14)
+    #if legend:
+    #   ax.legend(bbox_to_anchor=(1,1),ncol=2)
     #ax.legend(ncol=2)
+
+
+    p,s        = get_first_arrivals(example,seisbench=True)
+    #print('first arrivals',p,s)
+    p=float(p)
+    s=float(s) 
+   
+    ax = fig.add_subplot(gs[2,3])
+    ax.axis('off')
+    try:
+        #print(p,p_picks[0])
+        p_residual = (p-p_picks[0])/100
+        plt.text(0,1,'P residual = '+str(np.round(np.abs(p_residual),3))+' s',color='r')
+        #print(s,s_picks[0])
+        s_residual = (s-s_picks[0])/100
+        plt.text(0,0,'S residual = '+str(np.round(np.abs(s_residual),3))+' s',color='b')
+        #plt.axvline(p_picks[0],c='r')
+        #plt.axvline(s_picks[0],c='b')
+        plt.ylim(0,2)
+    except Exception as e:
+        print(e)
+
+
+
     return fig
 
 def plot_multiphase_predictions(example,predictions=False,picks=False,filtered=False,std=100,label_type='triangle',half_width=500,threshold=0.5,legend=True,labels=False,xlims=(0,30000)):
@@ -1865,10 +2138,10 @@ def plot_multiphase_predictions(example,predictions=False,picks=False,filtered=F
     if type(predictions)==np.ndarray:
         #predictions = np.asarray(predictions)
         #print(predictions)
-        pn_picks,_ = find_peaks(predictions[0,:], distance=150,height=threshold,width=100) 
-        pg_picks,_ = find_peaks(predictions[1,:], distance=150,height=threshold,width=100)
-        sn_picks,_ = find_peaks(predictions[2,:], distance=150,height=threshold,width=100)
-        sg_picks,_ = find_peaks(predictions[3,:], distance=150,height=threshold,width=100)
+        pn_picks,_ = find_peaks(predictions[0,:], distance=1500,height=threshold,width=100) 
+        pg_picks,_ = find_peaks(predictions[1,:], distance=1500,height=threshold,width=100)
+        sn_picks,_ = find_peaks(predictions[2,:], distance=1500,height=threshold,width=100)
+        sg_picks,_ = find_peaks(predictions[3,:], distance=1500,height=threshold,width=100)
     # second, pass the picks and plot them
     if picks:
        pn_picks = picks[0]
@@ -2230,11 +2503,18 @@ def to_obspy(example):
     st = Stream()
     for i in range(3):
         trace = Trace(data=example[()][i,:])
-        trace.stats.station = example.attrs['station_code']
-        trace.stats.network = example.attrs['station_network_code']
-        trace.stats.channel = example.attrs['channels'][i]
-        trace.stats.sampling_rate = 100.
-        trace.stats.starttime = example.attrs['trace_start_time']
+        try:
+            trace.stats.station = example.attrs['station_code']
+            trace.stats.network = example.attrs['station_network_code']
+            trace.stats.channel = example.attrs['channels'][i]
+            trace.stats.sampling_rate = 100.
+            trace.stats.starttime = example.attrs['trace_start_time']
+        except Exception as e:
+            trace.stats.station = example.attrs['station']
+            trace.stats.network = example.attrs['network']
+            trace.stats.channel = example.attrs['channels'][i]
+            trace.stats.sampling_rate = 100.
+            trace.stats.starttime = example.attrs['trace_start_time']
 
         st += trace
     return st
@@ -2277,7 +2557,7 @@ x = add_vertical_shift(x,0.3)
 """
 
 
-def predict_from_stream(st,model,overlap=0.2,threshold=0.5,normalize=True,stack=False):
+def predict_from_stream(st,model,overlap=0.2,threshold=0.5,normalize=True,stack=False,data_len=30000,debug=False):
     """
     run predictions on obspy streams with an sliding window
     st should be sampled at 100 Hz
@@ -2292,17 +2572,20 @@ def predict_from_stream(st,model,overlap=0.2,threshold=0.5,normalize=True,stack=
     else:
         data = np.stack((st[0].data,st[1].data,st[2].data),axis=0)    
     data = torch.from_numpy(data)
-    print('data shape ',data.shape)
+    if debug:
+        print('data shape ',data.shape)
     n_samples   = len(st[0].data)
-    print('n_samples  ', n_samples)
-    slide_step  = int(overlap*30000)
-    step_size   = int(30000 - (30000*overlap))
+    if debug:
+        print('n_samples  ', n_samples)
+    slide_step  = int(overlap*data_len)
+    step_size   = int(data_len - (data_len*overlap))
     n_steps     = int(np.ceil(n_samples/step_size))
-    X           = torch.zeros((n_steps,3,30000))
+    X           = torch.zeros((n_steps,3,data_len))
    
-    if n_samples==30000:
-        print('only one window')
-        X           = torch.zeros((1,3,30000))
+    if n_samples==data_len:
+        if debug:
+            print('only one window')
+        X           = torch.zeros((1,3,data_len))
         X[0,:,:]    = data
         X[0,:,:] = X[0,:,:] / torch.max(torch.abs(X[0,:,:]))
 
@@ -2310,8 +2593,8 @@ def predict_from_stream(st,model,overlap=0.2,threshold=0.5,normalize=True,stack=
     else:
 
         for i,step in enumerate(range(0,n_samples,step_size)):
-            if step<n_samples-30000:
-                X[i,:,:]=data[:,step:step+30000]
+            if step<n_samples-data_len:
+                X[i,:,:]=data[:,step:step+data_len]
                 if normalize:
                     X[i,:,:] = X[i,:,:] / torch.max(torch.abs(X[i,:,:]))     
             else:
@@ -2321,38 +2604,40 @@ def predict_from_stream(st,model,overlap=0.2,threshold=0.5,normalize=True,stack=
      
 
     predictions = model(X)
-    print('predictions done') 
+    if debug:
+        print('predictions done') 
     if not stack:
         return predictions
     if stack:
         #predictions = predictions.detach().numpy()
-        return stack_predictions(predictions,n_samples,overlap)
+        return stack_predictions(predictions,n_samples,overlap,data_len)
 
-def stack_predictions(predictions,n_samples,overlap=0.2):
+def stack_predictions(predictions,n_samples,overlap=0.2,data_len=30000,debug=False):
     """
     creates an array that does not need to use np.sum, asign predictions and normalize inside of a loop
     one prediction at a time
     """
     predictions = predictions.detach().numpy()
-    step_size   = int(30000 - (30000*overlap))
+    step_size   = int(data_len - (data_len*overlap))
     n_steps     = int(np.ceil(n_samples/step_size))
-    length      = (n_steps)*step_size + 30000
+    length      = (n_steps)*step_size + data_len
     n_steps     = int(np.ceil(n_samples/step_size))
     out         = np.zeros((predictions.shape[1],length))
-    print(out.shape)
+    if debug:
+        print(out.shape)
     for i,step in enumerate(range(0,n_samples,step_size)):
         #print(step)
-        out[:,step:step+30000]+=predictions[i,:,:] 
+        out[:,step:step+data_len]+=predictions[i,:,:] 
         # normalize over overlap indices
-        overlap_start = int(step + overlap*30000)
-        overlap_end   = int(step + 30000)
+        overlap_start = int(step + overlap*data_len)
+        overlap_end   = int(step + data_len)
         #out[:,overlap_start:overlap_end]= out[:,overlap_start:overlap_end]/2
     return out[:,:n_samples]
     
 
 
     
-def picks_to_df(tst,picks):
+def picks_to_df(tst,picks,debug=False):
     """
     take the picks, create a dataframe and write it
     """
@@ -2360,7 +2645,8 @@ def picks_to_df(tst,picks):
     sta_name = tst[0].stats.station
     net_name = tst[0].stats.network
     channels = [tr.stats.channel for tr in tst]
-    print(channels)
+    if debug:
+        print(channels)
     reftime  = tst[0].stats.starttime
     p_times  = [reftime + val for val in np.asarray(picks[0][0])/100]
     s_times  = [reftime + val for val in np.asarray(picks[1][0])/100]
@@ -2394,39 +2680,48 @@ def sanity_check_stream(st,mode='fill'):
     
     return st
 
-def execute(st,model,outname='skynet_picks.csv',threshold=0.5,stack=True,return_preds=False,overlap=0.2):
+def execute(st,model,outname='skynet_picks.csv',threshold=0.5,stack=True,return_preds=False,overlap=0.2,data_len=30000,debug=False):
     stations = list(set([tr.stats.station for tr in st]))
     dfs = []
     all_preds = []
-    for station in stations:
+    for k,station in enumerate(stations):
         try:
-         
-            print('Working on ',station)
+            if debug:
+                print('Working on ',station)
             tst = st.select(station=station)
             tst = sanity_check_stream(tst)
             tst = tst.sort()
             predictions = predict_from_stream(tst,model,overlap=overlap,
-                                                     normalize=True,stack=stack)
+                                                     normalize=True,stack=stack,data_len=data_len)
+            if debug:
+                print('predicted')
             if return_preds:
                 all_preds.append(predictions)
-
-            picks = extract_picks(predictions.detach().numpy(),threshold=threshold)
-            #picks = extract_picks(predictions,threshold=threshold)
+            if type(predictions)==torch.Tensor:
+                picks = extract_picks(predictions.detach().numpy(),threshold=threshold)
+            if type(predictions)!=torch.Tensor:
+                picks = extract_picks(predictions,threshold=threshold)
             # this is not passing the pick scores, why?
             #print(picks)
             tdf = picks_to_df(tst,picks)
-            print(tdf)
+            if debug:
+                print(tdf)
+            if k==0:
+                tdf.to_csv(outname, mode='a', index=False, header=True)
+            else:
+                tdf.to_csv(outname, mode='a', index=False, header=False)
             dfs.append(tdf)
         except Exception as e:
             print(e)
     df = pd.concat(dfs)
-    df.to_csv(outname,index=False)
-    print('Saved results in ',outname)
+    #df.to_csv(outname,index=False)
+    npicks = len(df)
+    print(f"Saved results in {outname}, {npicks} picks.")
     #if return_preds:
     #    return predictions
 
 
-def extract_picks(predictions,threshold=0.5):
+def extract_picks(predictions,threshold=0.5,width=100):
     """
     Takes the tensor from running the network predictions and extract the peaks, which will be the picks
     """
@@ -2441,8 +2736,8 @@ def extract_picks(predictions,threshold=0.5):
             s_preds  = preds[1,:]
             #p_picks,_  = find_peaks(p_preds, distance=500,height=threshold,width=100)
             #s_picks,_  = find_peaks(s_preds, distance=500,height=threshold,width=100)
-            p_picks  = find_peaks(p_preds, distance=500,height=threshold,width=100)
-            s_picks  = find_peaks(s_preds, distance=1200,height=threshold,width=100)
+            p_picks  = find_peaks(p_preds, distance=50,height=threshold,width=width)
+            s_picks  = find_peaks(s_preds, distance=50,height=threshold,width=width)
             p_ = [p_picks[0],p_picks[1]['peak_heights']]
             s_ = [s_picks[0],s_picks[1]['peak_heights']]
             picks.append((p_,s_))
@@ -2454,8 +2749,8 @@ def extract_picks(predictions,threshold=0.5):
         preds    = predictions#[i,:,:].detach().numpy()
         p_preds  = preds[0,:]
         s_preds  = preds[1,:]        
-        p_picks  = find_peaks(p_preds, distance=500,height=threshold,width=100)
-        s_picks  = find_peaks(s_preds, distance=500,height=threshold,width=100)
+        p_picks  = find_peaks(p_preds, distance=50,height=threshold,width=width)
+        s_picks  = find_peaks(s_preds, distance=50,height=threshold,width=width)
         # pass only the postions and heights of the picks
         p_ = [p_picks[0],p_picks[1]['peak_heights']]
         s_ = [s_picks[0],s_picks[1]['peak_heights']]
@@ -2473,7 +2768,7 @@ def picks_to_df(tst,picks):
     sta_name = tst[0].stats.station
     net_name = tst[0].stats.network
     channels = [tr.stats.channel for tr in tst]
-    print(channels)
+    #print(channels)
     reftime  = tst[0].stats.starttime
     p_times  = [reftime + val for val in np.asarray(picks[0][0])/100]
     s_times  = [reftime + val for val in np.asarray(picks[1][0])/100]
@@ -2658,13 +2953,13 @@ def plot_station_graph(graph,station_names=True):
 
     return fig
 
-def plot_wav_graph(graph,distance_sorting=True,labels=True,component='Z',edges=False,preds=False,traveltimes=False):
+def plot_wav_graph(graph,distance_sorting=True,labels=True,component='Z',edges=False,preds=False,traveltimes=False,limit=20,threshold=0.5):
     """
     plot the waveforms, edges, labels and other things
     """
 
-    threshold=0.5
-    fig=plt.figure()
+    #threshold=0.5
+    fig=plt.figure(figsize=(12,8))
     if   component=='Z':
          comp_index=2
     elif component=='N':
@@ -2685,9 +2980,9 @@ def plot_wav_graph(graph,distance_sorting=True,labels=True,component='Z',edges=F
 
     #print(sorted_distances)
     offset = 0
-    for i in sorted_distances:
+    for i in sorted_distances[:limit]:
    
-         plt.plot(graph.x[i,comp_index,:]-offset,'k',linewidth=0.5,zorder=100)
+         plt.plot(graph.x[i,comp_index,:]-offset,'k',linewidth=0.25,zorder=100)
          plt.plot(graph.y[i,1,:]-offset,'b',linewidth=1,linestyle='--')
          plt.plot(graph.y[i,0,:]-offset,'r',linewidth=1,linestyle='--')
          plt.text(-1100,-offset,graph.station_codes[i],fontsize=12,horizontalalignment='right',
@@ -2697,8 +2992,8 @@ def plot_wav_graph(graph,distance_sorting=True,labels=True,component='Z',edges=F
              plt.plot(graph.preds[i,1,:]-offset,'b',linewidth=1)
              plt.plot(graph.preds[i,0,:]-offset,'r',linewidth=1)
 
-             p_picks,_ = find_peaks(graph.preds[i,0,:], distance=150,height=threshold,width=100) 
-             s_picks,_ = find_peaks(graph.preds[i,1,:], distance=150,height=threshold,width=100)
+             p_picks,_ = find_peaks(graph.preds[i,0,:], distance=150,height=threshold,width=50) 
+             s_picks,_ = find_peaks(graph.preds[i,1,:], distance=150,height=threshold,width=50)
                          
              pick_pad=0.5
              if len(p_picks)>0:
@@ -2720,7 +3015,7 @@ def plot_wav_graph(graph,distance_sorting=True,labels=True,component='Z',edges=F
         #graph.edge_index = new_edge_index     
 
         # add the station edges
-        for i,node in enumerate(sorted_distances):
+        for i,node in enumerate(sorted_distances[:limit]):
             out_node  = [sorted_distances[i]]
             mask      = np.asarray(graph.edge_index[1,:]==out_node[0]) 
             in_nodes  = graph.edge_index[0,:][mask] # these need to be translated to the plot coordinates
@@ -2739,7 +3034,7 @@ def plot_wav_graph(graph,distance_sorting=True,labels=True,component='Z',edges=F
          offset = 0
          model  = TauPyModel(model="ak135")
          ttimes = []
-         for i in sorted_distances:
+         for i in sorted_distances[:limit]:
              station_lat = graph.station_latitudes[i]
              station_lon = graph.station_longitudes[i]
              event_lat   = graph.source_origin[0]
@@ -2777,8 +3072,16 @@ def plot_wav_graph(graph,distance_sorting=True,labels=True,component='Z',edges=F
     except Exception as e:
         print(e)
 
+    #plt.axis('off')
+
+    xticks = np.arange(0,12001,1000)
+    xlabels = np.arange(0,121,10)
+    
+    plt.xticks(xticks,xlabels)
+    plt.xlabel('seconds')
     plt.yticks([])
-    plt.xlim(-2000,xlim)
+    plt.xlim(-2200,xlim)
+    plt.ylim(-1*limit,1.2)
 
     return fig
 
@@ -2924,13 +3227,13 @@ def select_metadata(metadata):
 
 ################# PLOTTING #################
 
-def plot_picks(st,df,component='Z',sta_order=None,distances=None):
+def plot_picks(st,df,component='Z',sta_order=None,distances=None,figsize=(13,7)):
     """
     plots a component of the waveforms and the picks from a skynet file
     """
     st.detrend('demean')
 
-    figure=plt.figure(figsize=(13,7))
+    figure=plt.figure(figsize=figsize)
     picks = df.copy(deep=True)
     sttime = str(st[0].stats.starttime)
     sta_codes = list(set([tr.stats.station for tr in st]))
@@ -2939,29 +3242,34 @@ def plot_picks(st,df,component='Z',sta_order=None,distances=None):
         sta_codes=sta_order
     for i,sta_code in enumerate(sta_codes):
         tst = st.select(station=sta_code)
+        #print(sta_code,tst)
+        #plt.plot(tst.select(component=component)[0].normalize().data - i,'k',linewidth=0.5     ,alpha=0.6)
+        try:
+            subset_picks = picks[picks['station']==sta_code]
+            reftime = tst[0].stats.starttime
+            pick_positions = [UT(time)- reftime for time in  subset_picks['time'] ]
+            subset_picks.insert(2,'positions',pick_positions,True)
 
-        subset_picks = picks[picks['station']==sta_code]
-        reftime = tst[0].stats.starttime
-        pick_positions = [UT(time)- reftime for time in  subset_picks['time'] ]
-        subset_picks.insert(2,'positions',pick_positions,True)
+            p_picks = subset_picks[subset_picks['phase']=='P']
+            s_picks = subset_picks[subset_picks['phase']=='S']
 
-        p_picks = subset_picks[subset_picks['phase']=='P']
-        s_picks = subset_picks[subset_picks['phase']=='S']
+            pps = p_picks['positions'].to_list()
+            sss = s_picks['positions'].to_list()
 
-        pps = p_picks['positions'].to_list()
-        sss = s_picks['positions'].to_list()
+            plt.plot(tst.select(component=component)[0].normalize().data - i,'k',linewidth=0.5,alpha=0.6)
+            plt.vlines(np.asarray(pps)*100,ymin=-i-0.5,ymax=-i+0.5,colors='r')
+            plt.vlines(np.asarray(sss)*100,ymin=-i-0.5,ymax=-i+0.5,colors='b')
+            plt.text(0,-i,sta_code,horizontalalignment='right',bbox=dict(boxstyle="round",fc='white'))
+        except Exception as e:
+            print('no picks for ',sta_code)
 
-        plt.plot(tst.select(component=component)[0].normalize().data - i,'k',linewidth=0.5,alpha=0.6)
-        plt.vlines(np.asarray(pps)*100,ymin=-i-0.5,ymax=-i+0.5,colors='r')
-        plt.vlines(np.asarray(sss)*100,ymin=-i-0.5,ymax=-i+0.5,colors='b')
-        plt.text(0,-i,sta_code,horizontalalignment='right',bbox=dict(boxstyle="round",fc='white'))
         if distances:
             temp = str(distances[i])+' km'
             plt.text(500,-i,temp,fontsize=12)    	
 
     plt.xlim(0,max_len)
     # put markers every ten minutes if the length is appropriate
-    if max_len>30000:
+    if max_len>30005:
         xlabels  = np.asarray(np.arange(0,max_len/60000)*10,dtype=int)
         xmarkers = np.arange(0,max_len,60000)
         #print(max_len,xlabels,xmarkers)
@@ -2970,7 +3278,8 @@ def plot_picks(st,df,component='Z',sta_order=None,distances=None):
         #sttime = str(tst[0].stats.starttime)
         plt.xlabel('Minutes after '+sttime)
     else:
-       xlabels  = np.asarray(np.arange(0,max_len/6000 +1),dtype=int)
+       print('maxlen',max_len)
+       xlabels  = np.asarray(np.arange(0,(max_len/6000)),dtype=int)
        xmarkers = np.arange(0,max_len+1,6000)
        plt.xticks(xmarkers,xlabels)
        plt.xlabel('Minutes after '+sttime)
@@ -2982,7 +3291,116 @@ def plot_picks(st,df,component='Z',sta_order=None,distances=None):
     ax.spines['left'].set_visible(False)
     return figure
 
+def plot_picks_associations(st,picks,associations,component='Z',sta_order=None):
+    st=st.detrend('demean')
+    figure=plt.figure(figsize=(13,7))
+    #picks = df.copy(deep=True)
+    sttime = str(st[0].stats.starttime)
+    sta_codes = list(set([tr.stats.station for tr in st]))
+    max_len = max([tr.stats.npts for tr in st]) 
+    if sta_order:
+        sta_codes=sta_order
+    for i,sta_code in enumerate(sta_codes):
+        tst = st.select(station=sta_code)
+        #print(sta_code,tst)
+        #plt.plot(tst.select(component=component)[0].normalize().data - i,'k',linewidth=0.5     ,alpha=0.6)
+        try: 
+            subset_picks = picks[picks['station']==sta_code]
+            reftime = tst[0].stats.starttime
+            pick_positions = [UT(time)- reftime for time in  subset_picks['time'] ]
+            subset_picks.insert(2,'positions',pick_positions,True)
+            p_picks = subset_picks[subset_picks['phase']=='P']
+            s_picks = subset_picks[subset_picks['phase']=='S']
+            pps = p_picks['positions'].to_list()
+            sss = s_picks['positions'].to_list()
+            
+            subset_associations = associations[associations['station']==sta_code]
+            associations_positions = [UT(time)- reftime for time in  subset_associations['time'] ]
+            subset_associations.insert(2,'positions',associations_positions,True)
+            p_ass = subset_associations[subset_associations['phase']=='P']
+            s_ass = subset_associations[subset_associations['phase']=='S']
+            apps = p_ass['positions'].to_list()
+            asss = s_ass['positions'].to_list()
+            
+            plt.plot(tst.select(component=component)[0].normalize().data - i,'k',linewidth=0.5,alpha=0.6)
+            #plt.vlines(np.asarray(pps)*100,ymin=-i-0.5,ymax=-i+0.5,colors='r')
+            plt.scatter(np.asarray(pps)*100,-i*np.ones(len(pps))-0.15,marker='2',color='r',s=200)
+            #plt.vlines(np.asarray(sss)*100,ymin=-i-0.5,ymax=-i+0.5,colors='b')
+            plt.scatter(np.asarray(sss)*100,-i*np.ones(len(sss))-0.15,marker='2',color='b',s=200)
+            
+            plt.scatter(np.asarray(apps)*100,-i*np.ones(len(apps))+0.15,marker='v',color='r',s=80,alpha=1)
+            plt.scatter(np.asarray(asss)*100,-i*np.ones(len(asss))+0.15,marker='v',color='b',s=80,alpha=1)
+            
+            
+            plt.text(0,-i,sta_code,horizontalalignment='right',bbox=dict(boxstyle="round",fc='white'))
+            
+        except Exception as e:
+            print('no picks for ',sta_code)
+            
+            
+    # add lines to connect the associated picks that belong to the same event
+    # loop over event index
+    
+    # create a list of colors from a colormap and randomly choose from event
+    cmap=mpl.colormaps['turbo']
+    n_colors = len(cmap.colors)
+    
+    event_indices = list(set(associations['event_idx']))
+    for i,event_index in enumerate(event_indices):
+        pXY = []; sXY=[]
+        event_subset = associations[associations['event_idx']==event_index]
+        for j,sta_code in enumerate(sta_codes):
+            # get the x and y positions
+            tst = st.select(station=sta_code)
+            reftime = tst[0].stats.starttime
+            # get the one pick for this event at this station
+            tdf = event_subset[event_subset['station']==sta_code]
+            ptdf = tdf[tdf['phase']=='P']
+            if len(ptdf)>0:
+            
+                temp_y = -j
+                temp_x = [UT(time)- reftime for time in  ptdf['time'] ]
+                pXY.append((temp_x[0],temp_y))
+                
+            stdf = tdf[tdf['phase']=='S']
+            if len(stdf)>0:
+            
+                temp_y = -j
+                temp_x = [UT(time)- reftime for time in  stdf['time'] ]
+                sXY.append((temp_x[0],temp_y))
+        
+        # plot the lines
+        tcolor = cmap.colors[np.random.randint(0,256)]
+        if len(pXY)>0:
+            pXY = np.asarray(pXY)
+            plt.plot(pXY[:,0]*100,pXY[:,1],zorder=0,linewidth=3,alpha=0.2,color='r')#tcolor)
+        if len(sXY)>0:
+            sXY = np.asarray(sXY)
+            plt.plot(sXY[:,0]*100,sXY[:,1],zorder=0,linewidth=3,alpha=0.2,color='b')#tcolor)
+            
+    plt.xlim(0,max_len)
+    # put markers every ten minutes if the length is appropriate
+    print(max_len)
+    if max_len>30000:
+        xlabels  = np.asarray(np.arange(0,max_len/60000)*10,dtype=int)
+        xmarkers = np.arange(0,max_len,60000)
+        #print(max_len,xlabels,xmarkers)
+        plt.xticks(xmarkers,xlabels)
+        # title with the start time of the first trace
+        #sttime = str(tst[0].stats.starttime)
+        plt.xlabel('Minutes after '+sttime)
+    else:
+        xlabels  = np.asarray(np.arange(0,max_len/6000 +1),dtype=int)
+        xmarkers = np.arange(0,max_len+1,6000)
+        plt.xticks(xmarkers,xlabels)
+        plt.xlabel('Minutes after '+sttime)
 
+    plt.yticks([])
+    ax=plt.gca()
+
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    return figure
 
 def shift_and_stack(st,picks,component='Z',mode='envelope',phase='P',sta_order=None,distances=None):
     """
@@ -3064,6 +3482,127 @@ def adjust_times(time):
     return time - 8*60*60
 
 
+def plot_skynet_preds(st,model,filtered=False,outname=None,
+                         sta_order=None,amp_level=1,xlims=(0,30000),sta_names=True,
+                         associations=None,plot_picks=False,figsize=(12,8),v_offset=1,distances=None):
+    
+    # There is an offset in phasenet predictions careful
+    
+    
+    
+    all_preds=[]
+    all_picks=[]
+    #all_pn_preds=[]
+    if sta_order is not None:
+        stations=sta_order
+    else:
+        stations = list(set([tr.stats.station for tr in st]))
+    #print(stations)
+    for station in stations:
+        tst = st.select(station=station)
+        tst=tst.sort()
+        preds=predict_from_stream(tst,model).detach().numpy()
+        picks=extract_picks(preds)
+        #pn_preds=pn_model.annotate(tst)
+        
+        #offset = int((pn_preds[0].stats.starttime - tst[0].stats.starttime)*100)
+        
+        all_preds.append(preds)
+        #all_pn_preds.append(pn_preds)
+        all_picks.append(picks)
+        
+    # filter only for plotting
+    if filtered:
+        f_st = st.copy()
+        f_st.detrend('demean')
+        f_st.taper(max_percentage=0.01)
+        f_st.filter('bandpass',freqmin=1,freqmax=10)
+        f_st.detrend('demean')
+
+        st=f_st
+        
+    plt.figure(figsize=figsize)
+    i=0
+    pc='darkorange'
+    sc='royalblue'
+    counter=0
+
+    #for skynet_pred,pn_pred,station,picks in zip(all_preds,all_pn_preds,stations,all_picks):
+    for skynet_pred,station,picks in zip(all_preds,stations,all_picks):
+        #v_offset=1.3
+        i+=v_offset
+
+        tst=st.select(station=station)
+        tst.detrend('demean')
+        plt.plot(amp_level*(tst[-1].data/np.max(np.abs(tst[-1].data)))-i ,'k',linewidth=0.5,alpha=0.55,zorder=0)
+        if sta_names:
+            plt.text(-200,-i,tst[0].stats.network+'.'+station,horizontalalignment='right',bbox=dict(boxstyle="round",fc='white'))
+            #plt.text(xlims[0]+300,-i+0.1,tst[0].stats.network+'.'+station,bbox=dict(boxstyle="round,pad=0.15",fc='white',))
+            
+        if distances:
+            temp = str(distances[counter])+' km'
+            plt.text(300,-i+0.1,temp,fontsize=14)
+            counter+=1
+        if i==v_offset:
+            plt.plot(skynet_pred[0,0,:]-i,'r',label='SKYNET P')
+            plt.plot(skynet_pred[0,1,:]-i,'b',label='SKYNET S')
+            # need to apply the offset
+            
+            #plt.plot(np.arange(0,len(pn_pred[1].data))+offset,pn_pred[1].data-i,c=pc,label='PhaseNet P',lw=2)
+            #plt.plot(np.arange(0,len(pn_pred[2].data))+offset,pn_pred[2].data-i,c=sc,label='PhaseNet S',lw=2)
+            
+            if plot_picks:
+                try:
+                    plt.plot([picks[0][0][0][0],picks[0][0][0][0]],[-i,-i-0.2],c='r')
+                    plt.plot([picks[0][0][0][0]-100 ,picks[0][0][0][0]],[-i-0.2-0.0625,-i-0.2],c='r')
+                    plt.plot([picks[0][0][0][0]+100 ,picks[0][0][0][0]],[-i-0.2-0.0625,-i-0.2],c='r')
+                except Exception as e:
+                    g=0
+                try:
+                    
+                    plt.plot([picks[0][1][0][0],picks[0][1][0][0]],[-i,-i-0.2],c='b')
+                    plt.plot([picks[0][1][0][0]-100 ,picks[0][1][0][0]],[-i-0.2-0.0625,-i-0.2],c='b')
+                    plt.plot([picks[0][1][0][0]+100 ,picks[0][1][0][0]],[-i-0.2-0.0625,-i-0.2],c='b')
+                except Exception as e:
+                    g=0
+            
+        else:
+            plt.plot(skynet_pred[0,0,:]-i,'r',label='')
+            plt.plot(skynet_pred[0,1,:]-i,'b',label='')
+            #plt.plot(np.arange(0,len(pn_pred[1].data))+offset,pn_pred[1].data-i,c=pc,label='',lw=2)
+            #plt.plot(np.arange(0,len(pn_pred[2].data))+offset,pn_pred[2].data-i,c=sc,label='',lw=2)    
+            
+            if plot_picks:
+                try:
+                    plt.plot([picks[0][0][0][0],picks[0][0][0][0]],[-i,-i-0.2],c='r')
+                    plt.plot([picks[0][0][0][0]-100 ,picks[0][0][0][0]],[-i-0.2-0.0625,-i-0.2],c='r')
+                    plt.plot([picks[0][0][0][0]+100 ,picks[0][0][0][0]],[-i-0.2-0.0625,-i-0.2],c='r')
+                except Exception as e:
+                    g=0
+                try:
+                    plt.plot([picks[0][1][0][0],picks[0][1][0][0]],[-i,-i-0.2],c='b')
+                    plt.plot([picks[0][1][0][0]-100 ,picks[0][1][0][0]],[-i-0.2-0.0625,-i-0.2],c='b')
+                    plt.plot([picks[0][1][0][0]+100 ,picks[0][1][0][0]],[-i-0.2-0.0625,-i-0.2],c='b')
+                except Exception as e:
+                    g=0
+
+        #plt.axhline(-i+0.5,linestyle='--',c='gray')
+
+
+    plt.yticks([])
+    plt.xticks(np.arange(0,30001,3000),np.arange(0,301,30))
+    
+    plt.xlim(xlims)
+    plt.legend(ncol=4,loc='lower center')
+    
+    xstr = 'Seconds after '+str(st[0].stats.starttime)
+    plt.xlabel(xstr)
+    
+    if amp_level>2:
+        plt.ylim(-2,0)
+    
+    if outname is not None:
+        plt.savefig(outname)
 
 ################MODELS########################    
 class Long_PhaseNet(nn.Module):
@@ -3459,7 +3998,7 @@ class col_picker(nn.Module):
         self.bnd10    = nn.BatchNorm1d(num_features=8,eps=1e-3)
         self.dconv11  = nn.Conv1d(8,3,kernel_size=kernel_size,stride=1,padding='same')
         self.bnd11    = nn.BatchNorm1d(num_features=3,eps=1e-3)        
-        
+        # is bnd11 a problem?       
         self.softmax = nn.Softmax(dim=1)
         
     def forward(self,X):
@@ -3503,3 +4042,206 @@ class col_picker(nn.Module):
      
         return X24
 
+
+
+class ncol_picker(nn.Module):
+    def __init__(self,kernel_size=7,stride=4):
+        super(ncol_picker,self).__init__()
+        pad_size = int(kernel_size/2)
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
+        
+        
+        self.conv1  = nn.Conv1d(3,8,  kernel_size=kernel_size,stride=1,padding='same')
+        self.bn1    = nn.BatchNorm1d(num_features=8,eps=1e-3)
+        self.conv2  = nn.Conv1d(8,8,  kernel_size=kernel_size,stride=1,padding='same')
+        self.bn2    = nn.BatchNorm1d(num_features=8,eps=1e-3)
+        self.conv3  = nn.Conv1d(8,8,  kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bn3    = nn.BatchNorm1d(num_features=8,eps=1e-3)
+        self.conv4  = nn.Conv1d(8,11, kernel_size=kernel_size,stride=1,padding='same')
+        self.bn4    = nn.BatchNorm1d(num_features=11,eps=1e-3)
+        self.conv5  = nn.Conv1d(11,11,kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bn5    = nn.BatchNorm1d(num_features=11,eps=1e-3)
+        self.conv6  = nn.Conv1d(11,16,kernel_size=kernel_size,stride=1,padding='same')
+        self.bn6    = nn.BatchNorm1d(num_features=16,eps=1e-3)
+        self.conv7  = nn.Conv1d(16,16,kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bn7    = nn.BatchNorm1d(num_features=16,eps=1e-3)
+        self.conv8  = nn.Conv1d(16,22,kernel_size=kernel_size,stride=1,padding='same')
+        self.bn8    = nn.BatchNorm1d(num_features=22,eps=1e-3)
+        self.conv9  = nn.Conv1d(22,22,kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bn9    = nn.BatchNorm1d(num_features=22,eps=1e-3)
+        self.conv10 = nn.Conv1d(22,32,kernel_size=kernel_size,stride=1,padding='same')
+        self.bn10   = nn.BatchNorm1d(num_features=32,eps=1e-3)
+        self.conv11 = nn.Conv1d(32,32,kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bn11   = nn.BatchNorm1d(num_features=32,eps=1e-3)
+        self.conv12 = nn.Conv1d(32,48,kernel_size=kernel_size,stride=1,padding='same')
+        self.bn12   = nn.BatchNorm1d(num_features=48,eps=1e-3)
+        
+        self.dconv1  = nn.ConvTranspose1d(48,32,kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bnd1    = nn.BatchNorm1d(num_features=32,eps=1e-3)
+        self.dconv2  = nn.Conv1d(64,32,kernel_size=kernel_size,stride=1,padding='same')
+        self.bnd2    = nn.BatchNorm1d(num_features=32,eps=1e-3)
+        self.dconv3  = nn.ConvTranspose1d(32,22,kernel_size=kernel_size,stride=stride,padding=pad_size-1)
+        self.bnd3    = nn.BatchNorm1d(num_features=22,eps=1e-3)
+        self.dconv4  = nn.Conv1d(44,22,kernel_size=kernel_size,stride=1,padding='same')
+        self.bnd4    = nn.BatchNorm1d(num_features=22,eps=1e-3)
+        self.dconv5  = nn.ConvTranspose1d(22,16,kernel_size=kernel_size,stride=stride,padding=pad_size-1)
+        self.bnd5    = nn.BatchNorm1d(num_features=16,eps=1e-3)
+        self.dconv6  = nn.Conv1d(32,16,kernel_size=kernel_size,stride=1,padding='same')
+        self.bnd6    = nn.BatchNorm1d(num_features=16,eps=1e-3)
+        self.dconv7  = nn.ConvTranspose1d(16,11,kernel_size=kernel_size,stride=stride,padding=pad_size-1)
+        self.bnd7    = nn.BatchNorm1d(num_features=11,eps=1e-3)
+        self.dconv8  = nn.Conv1d(22,11,kernel_size=kernel_size,stride=1,padding='same')
+        self.bnd8    = nn.BatchNorm1d(num_features=11,eps=1e-3)
+        self.dconv9  = nn.ConvTranspose1d(11,8,kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bnd9    = nn.BatchNorm1d(num_features=8,eps=1e-3)
+        self.dconv10  = nn.Conv1d(16,8,kernel_size=kernel_size,stride=1,padding='same')
+        self.bnd10    = nn.BatchNorm1d(num_features=8,eps=1e-3)
+        self.dconv11  = nn.Conv1d(8,3,kernel_size=kernel_size,stride=1,padding='same')
+        self.bnd11    = nn.BatchNorm1d(num_features=3,eps=1e-3)        
+        # is bnd11 a problem?       
+        self.softmax = nn.Softmax(dim=1)
+        
+    def forward(self,X):
+        
+        X1 = torch.relu(self.bn1(self.conv1(X)));#print('X1',X1.shape)
+        X2 = torch.relu(self.bn2(self.conv2(X1)));#print('X2',X2.shape)
+        X3 = torch.relu(self.bn3(self.conv3(X2)));#print('X3',X3.shape)
+        X4 = torch.relu(self.bn4(self.conv4(X3)));#print('X4',X4.shape)
+        X5 = torch.relu(self.bn5(self.conv5(X4)));#print('X5',X5.shape)
+        X6 = torch.relu(self.bn6(self.conv6(X5)));#print('X6',X6.shape)
+        X7 = torch.relu(self.bn7(self.conv7(X6)));#print('X7',X7.shape)
+        X8 = torch.relu(self.bn8(self.conv8(X7)));#print('X8',X8.shape)
+        X9 = torch.relu(self.bn9(self.conv9(X8)));#print('X9',X9.shape)
+        X10 = torch.relu(self.bn10(self.conv10(X9)));#print('X10',X10.shape)
+        X11 = torch.relu(self.bn11(self.conv11(X10)));#print('X11',X11.shape)
+        X12 = torch.relu(self.bn12(self.conv12(X11)));#print('X12',X12.shape,' deepest')
+        ##print(X12.shape, ' deepest ')
+        # the up branch
+        X13 = torch.relu(self.bnd1(self.dconv1(X12)));#print('X13',X13.shape)
+        X13 = torch.cat((torch.zeros((X13.shape[0],X13.shape[1],1),device=self.device),X13,torch.zeros((X13.shape[0],X13.shape[1],1),device=self.device)),dim=-1);#print('X13',X13.shape)
+        X14 = torch.cat((X10,X13),dim=1);#print('X14',X14.shape)
+        X14 = torch.relu(self.bnd2(self.dconv2(X14)));#print('X14',X14.shape)
+        X15 = torch.relu(self.bnd3(self.dconv3(X14)));#print('X15',X15.shape)
+        X15 = torch.cat((X15,torch.zeros((X15.shape[0],X15.shape[1],1),device=self.device)),dim=-1)
+        X15 = torch.cat((X15,X8),dim=1);#print('X15',X15.shape)
+        X16 = torch.relu(self.bnd4(self.dconv4(X15)));#print('X16',X16.shape)
+        X17 = torch.relu(self.bnd5(self.dconv5(X16)));X17=X17[:,:,:-1];#print('X17',X17.shape)
+        X17 = torch.cat((X6,X17),dim=1);#print('X17',X17.shape)
+        X18 = torch.relu(self.bnd6(self.dconv6(X17)));#print('X18',X18.shape)
+        X19 = torch.relu(self.bnd7(self.dconv7(X18)))
+        X19 = torch.cat((X19,torch.zeros((X19.shape[0],X19.shape[1],1),device=self.device)),dim=-1)
+        X19 = torch.cat((X4,X19),dim=1);#print('X19',X19.shape)
+        X20 = torch.relu(self.bnd8(self.dconv8(X19)));#print('X20',X20.shape)
+        X21 = torch.relu(self.bnd9(self.dconv9(X20)))
+        X21 = torch.cat((torch.zeros((X21.shape[0],X21.shape[1],1),device=self.device),X21,torch.zeros((X21.shape[0],X21.shape[1],2),device=self.device)),dim=-1);#print('X21',X21.shape)
+        X21 = torch.cat((X2,X21),dim=1);#print('X21',X21.shape)
+        X22 = torch.relu(self.bnd10(self.dconv10(X21)));#print('X22',X22.shape)
+        #X23 = torch.relu(self.bnd11(self.dconv11(X22)));#print('X23',X23.shape)
+        X23 = self.dconv11(X22)
+        X24 = self.softmax(X23)
+     
+        return X24
+
+class acol_picker(nn.Module):
+    def __init__(self,kernel_size=7,stride=4):
+        super(acol_picker,self).__init__()
+        pad_size = int(kernel_size/2)
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
+        
+        
+        self.conv1  = nn.Conv1d(3,8,  kernel_size=kernel_size,stride=1,padding='same')
+        self.bn1    = nn.BatchNorm1d(num_features=8,eps=1e-3)
+        self.conv2  = nn.Conv1d(8,8,  kernel_size=kernel_size,stride=1,padding='same')
+        self.bn2    = nn.BatchNorm1d(num_features=8,eps=1e-3)
+        self.conv3  = nn.Conv1d(8,8,  kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bn3    = nn.BatchNorm1d(num_features=8,eps=1e-3)
+        self.conv4  = nn.Conv1d(8,11, kernel_size=kernel_size,stride=1,padding='same')
+        self.bn4    = nn.BatchNorm1d(num_features=11,eps=1e-3)
+        self.conv5  = nn.Conv1d(11,11,kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bn5    = nn.BatchNorm1d(num_features=11,eps=1e-3)
+        self.conv6  = nn.Conv1d(11,16,kernel_size=kernel_size,stride=1,padding='same')
+        self.bn6    = nn.BatchNorm1d(num_features=16,eps=1e-3)
+        self.conv7  = nn.Conv1d(16,16,kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bn7    = nn.BatchNorm1d(num_features=16,eps=1e-3)
+        self.conv8  = nn.Conv1d(16,22,kernel_size=kernel_size,stride=1,padding='same')
+        self.bn8    = nn.BatchNorm1d(num_features=22,eps=1e-3)
+        self.conv9  = nn.Conv1d(22,22,kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bn9    = nn.BatchNorm1d(num_features=22,eps=1e-3)
+        self.conv10 = nn.Conv1d(22,32,kernel_size=kernel_size,stride=1,padding='same')
+        self.bn10   = nn.BatchNorm1d(num_features=32,eps=1e-3)
+        self.conv11 = nn.Conv1d(32,32,kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bn11   = nn.BatchNorm1d(num_features=32,eps=1e-3)
+        self.conv12 = nn.Conv1d(32,48,kernel_size=kernel_size,stride=1,padding='same')
+        self.bn12   = nn.BatchNorm1d(num_features=48,eps=1e-3)
+        
+        self.dconv1  = nn.ConvTranspose1d(48,32,kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bnd1    = nn.BatchNorm1d(num_features=32,eps=1e-3)
+        self.dconv2  = nn.Conv1d(64,32,kernel_size=kernel_size,stride=1,padding='same')
+        self.bnd2    = nn.BatchNorm1d(num_features=32,eps=1e-3)
+        self.dconv3  = nn.ConvTranspose1d(32,22,kernel_size=kernel_size,stride=stride,padding=pad_size-1)
+        self.bnd3    = nn.BatchNorm1d(num_features=22,eps=1e-3)
+        self.dconv4  = nn.Conv1d(44,22,kernel_size=kernel_size,stride=1,padding='same')
+        self.bnd4    = nn.BatchNorm1d(num_features=22,eps=1e-3)
+        self.dconv5  = nn.ConvTranspose1d(22,16,kernel_size=kernel_size,stride=stride,padding=pad_size-1)
+        self.bnd5    = nn.BatchNorm1d(num_features=16,eps=1e-3)
+        self.dconv6  = nn.Conv1d(32,16,kernel_size=kernel_size,stride=1,padding='same')
+        self.bnd6    = nn.BatchNorm1d(num_features=16,eps=1e-3)
+        self.dconv7  = nn.ConvTranspose1d(16,11,kernel_size=kernel_size,stride=stride,padding=pad_size-1)
+        self.bnd7    = nn.BatchNorm1d(num_features=11,eps=1e-3)
+        self.dconv8  = nn.Conv1d(22,11,kernel_size=kernel_size,stride=1,padding='same')
+        self.bnd8    = nn.BatchNorm1d(num_features=11,eps=1e-3)
+        self.dconv9  = nn.ConvTranspose1d(11,8,kernel_size=kernel_size,stride=stride,padding=pad_size)
+        self.bnd9    = nn.BatchNorm1d(num_features=8,eps=1e-3)
+        self.dconv10  = nn.Conv1d(16,8,kernel_size=kernel_size,stride=1,padding='same')
+        self.bnd10    = nn.BatchNorm1d(num_features=8,eps=1e-3)
+        self.dconv11  = nn.Conv1d(8,3,kernel_size=kernel_size,stride=1,padding='same')
+        self.bnd11    = nn.BatchNorm1d(num_features=3,eps=1e-3)        
+        # is bnd11 a problem?       
+        self.softmax = nn.Softmax(dim=1)
+        
+    def forward(self,X):
+        
+        X1 = torch.relu(self.bn1(self.conv1(X)));#print('X1',X1.shape)
+        X2 = torch.relu(self.bn2(self.conv2(X1)));#print('X2',X2.shape)
+        X3 = torch.relu(self.bn3(self.conv3(X2)));#print('X3',X3.shape)
+        X4 = torch.relu(self.bn4(self.conv4(X3)));#print('X4',X4.shape)
+        X5 = torch.relu(self.bn5(self.conv5(X4)));#print('X5',X5.shape)
+        X6 = torch.relu(self.bn6(self.conv6(X5)));#print('X6',X6.shape)
+        X7 = torch.relu(self.bn7(self.conv7(X6)));#print('X7',X7.shape)
+        X8 = torch.relu(self.bn8(self.conv8(X7)));#print('X8',X8.shape)
+        X9 = torch.relu(self.bn9(self.conv9(X8)));#print('X9',X9.shape)
+        X10 = torch.relu(self.bn10(self.conv10(X9)));#print('X10',X10.shape)
+        X11 = torch.relu(self.bn11(self.conv11(X10)));#print('X11',X11.shape)
+        X12 = torch.relu(self.bn12(self.conv12(X11)));#print('X12',X12.shape,' deepest')
+        ##print(X12.shape, ' deepest ')
+        # the up branch
+        X13 = torch.relu(self.bnd1(self.dconv1(X12)));#print('X13',X13.shape)
+        X13 = torch.cat((torch.zeros((X13.shape[0],X13.shape[1],1),device=self.device),X13,torch.zeros((X13.shape[0],X13.shape[1],1),device=self.device)),dim=-1);#print('X13',X13.shape)
+        X14 = torch.cat((X10,X13),dim=1);#print('X14',X14.shape)
+        X14 = torch.relu(self.bnd2(self.dconv2(X14)));#print('X14',X14.shape)
+        X15 = torch.relu(self.bnd3(self.dconv3(X14)));#print('X15',X15.shape)
+        X15 = torch.cat((X15,torch.zeros((X15.shape[0],X15.shape[1],1),device=self.device)),dim=-1)
+        X15 = torch.cat((X15,X8),dim=1);#print('X15',X15.shape)
+        X16 = torch.relu(self.bnd4(self.dconv4(X15)));#print('X16',X16.shape)
+        X17 = torch.relu(self.bnd5(self.dconv5(X16)));X17=X17[:,:,:-1];#print('X17',X17.shape)
+        X17 = torch.cat((X6,X17),dim=1);#print('X17',X17.shape)
+        X18 = torch.relu(self.bnd6(self.dconv6(X17)));#print('X18',X18.shape)
+        X19 = torch.relu(self.bnd7(self.dconv7(X18)))
+        X19 = torch.cat((X19,torch.zeros((X19.shape[0],X19.shape[1],1),device=self.device)),dim=-1)
+        X19 = torch.cat((X4,X19),dim=1);#print('X19',X19.shape)
+        X20 = torch.relu(self.bnd8(self.dconv8(X19)));#print('X20',X20.shape)
+        X21 = torch.relu(self.bnd9(self.dconv9(X20)))
+        X21 = torch.cat((torch.zeros((X21.shape[0],X21.shape[1],1),device=self.device),X21,torch.zeros((X21.shape[0],X21.shape[1],2),device=self.device)),dim=-1);#print('X21',X21.shape)
+        X21 = torch.cat((X2,X21),dim=1);#print('X21',X21.shape)
+        X22 = torch.relu(self.bnd10(self.dconv10(X21)));#print('X22',X22.shape)
+        #X23 = torch.relu(self.bnd11(self.dconv11(X22)));#print('X23',X23.shape)
+        X23 = self.dconv11(X22)
+        X24 = self.softmax(X23)
+     
+        return [X1,X2,X3,X4,X5,X6,X7,X8,X9,X10,X11,X12,X13,X14,X15,X16,X17,X18,X19,X20,X21,X22,X23,X24]

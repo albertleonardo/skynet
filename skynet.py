@@ -67,7 +67,7 @@ def open(fname):
 def load_model(modelname,mode='eval'):
 	if modelname=='regional_picker':
 		model=Regional_Picker(3)
-		model.load_state_dict(torch.load('skynet_models/500_CREW_complex_data_640',map_location='cpu'))
+		model.load_state_dict(torch.load('skynet_models/regional_picker',map_location='cpu'))
 		model.eval()
 	return model		
 
@@ -2835,6 +2835,9 @@ def load_multistation_example(origin_ID,data,k_neighbors=5,seismometer_only=Fals
             if origin_ID in name:
                 outnames.append(name)
 
+
+    
+
     pick_flag=[]
     for name in outnames:
         examples.append(data[name])
@@ -2843,15 +2846,18 @@ def load_multistation_example(origin_ID,data,k_neighbors=5,seismometer_only=Fals
         if p=='NaN':
             pick_flag.append(0)
         else:
+            # have a workaround examples with stations without coordinates
             pick_flag.append(1)
             if seisbench==True:
                 source_origin = [example.attrs['source_latitude_deg'],example.attrs['source_longitude_deg'],
                              example.attrs['source_depth_km'],example.attrs['source_origin_time'],
                              example.attrs['source_magnitude']]
+
             if seisbench==False:
                 source_origin = [example.attrs['event_origin_latitude'],example.attrs['event_origin_longitude'],
                                  example.attrs['event_origin_depth'],example.attrs['event_origin_time'],
                                  example.attrs['magnitude']]    
+   
 
     n_stations = len(examples)
     print(n_stations,' stations available')
@@ -2871,6 +2877,7 @@ def load_multistation_example(origin_ID,data,k_neighbors=5,seismometer_only=Fals
 
 
     # get the station locations, calculate distances and create a knn graph
+    
     if seisbench==True:
         station_codes = [example.attrs['station_code'] for example in examples]
         station_lats  = np.asarray([example.attrs['station_latitude_deg'] for example in examples])
@@ -2884,7 +2891,7 @@ def load_multistation_example(origin_ID,data,k_neighbors=5,seismometer_only=Fals
     #station_lats  = np.asarray([example.attrs['station_latitude'] for example in examples])
     #station_lons  = np.asarray([example.attrs['station_longitude'] for example in examples])
     trace_start_times = [example.attrs['trace_start_time'] for example in examples]
-
+    
     knn = []
     for i,station in enumerate(station_codes):
         # for now station elevation is ignored

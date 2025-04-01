@@ -67,7 +67,7 @@ def open(fname):
 def load_model(modelname,mode='eval'):
 	if modelname=='regional_picker':
 		model=Regional_Picker(3)
-		model.load_state_dict(torch.load('skynet_models/regional_picker',map_location='cpu'))
+		model.load_state_dict(torch.load('/Users/albert/Pn/skynet_models/regional_picker',map_location='cpu'))
 		model.eval()
 	return model		
 
@@ -2302,7 +2302,7 @@ def plot_multiphase_predictions(example,predictions=False,picks=False,filtered=F
     #ax.legend(ncol=2)
     return fig
 
-def plot_multiphase_predictions_from_stream(st,predictions=False,picks=False,filtered=False,std=100,label_type='triangle',half_width=500,threshold=0.5,legend=True,labels=False,xlims=(0,30000)):
+def plot_multiphase_predictions_from_stream(st,predictions=False,picks=False,filtered=False,std=100,label_type='triangle',half_width=500,threshold=0.5,legend=True,labels=False,xlims=(0,30000),amp_factor=1):
     """
     plots the waveforms along with predicitons from streams of data, this one is for 5 minutes only
     no labels
@@ -2314,6 +2314,7 @@ def plot_multiphase_predictions_from_stream(st,predictions=False,picks=False,fil
     traces[1,:] = st[1].data[:30000]
     traces[2,:] = st[2].data[:30000]
     traces = traces/np.max(np.abs(traces))
+    traces = traces*amp_factor
 
     if filtered:
         traces = bandpass_data(traces)
@@ -2719,6 +2720,7 @@ def execute(st,model,outname='skynet_picks.csv',threshold=0.5,stack=True,return_
     print(f"Saved results in {outname}, {npicks} picks.")
     #if return_preds:
     #    return predictions
+    return df
 
 
 def extract_picks(predictions,threshold=0.5,width=100):
@@ -3234,7 +3236,7 @@ def select_metadata(metadata):
 
 ################# PLOTTING #################
 
-def plot_picks(st,df,component='Z',sta_order=None,distances=None,figsize=(13,7)):
+def plot_picks(st,df,component='Z',sta_order=None,distances=None,figsize=(13,7),v_offset=1,fontsize=12):
     """
     plots a component of the waveforms and the picks from a skynet file
     """
@@ -3242,7 +3244,7 @@ def plot_picks(st,df,component='Z',sta_order=None,distances=None,figsize=(13,7))
 
     figure=plt.figure(figsize=figsize)
     picks = df.copy(deep=True)
-    sttime = str(st[0].stats.starttime)
+    sttime = str(st[0].stats.starttime)[:-5]
     sta_codes = list(set([tr.stats.station for tr in st]))
     max_len = max([tr.stats.npts for tr in st])
     if sta_order:
@@ -3251,7 +3253,13 @@ def plot_picks(st,df,component='Z',sta_order=None,distances=None,figsize=(13,7))
         tst = st.select(station=sta_code)
         #print(sta_code,tst)
         #plt.plot(tst.select(component=component)[0].normalize().data - i,'k',linewidth=0.5     ,alpha=0.6)
+        if len(tst)==0:
+            pass
         try:
+            #print('try station ',sta_code)
+            plt.plot(tst.select(component=component)[0].normalize().data - i*v_offset,'k',linewidth=0.5,alpha=0.6)
+            plt.text(0,-i*v_offset,sta_code,horizontalalignment='right',fontsize=fontsize,bbox=dict(boxstyle="round",fc='white'))
+
             subset_picks = picks[picks['station']==sta_code]
             reftime = tst[0].stats.starttime
             pick_positions = [UT(time)- reftime for time in  subset_picks['time'] ]
@@ -3263,16 +3271,16 @@ def plot_picks(st,df,component='Z',sta_order=None,distances=None,figsize=(13,7))
             pps = p_picks['positions'].to_list()
             sss = s_picks['positions'].to_list()
 
-            plt.plot(tst.select(component=component)[0].normalize().data - i,'k',linewidth=0.5,alpha=0.6)
-            plt.vlines(np.asarray(pps)*100,ymin=-i-0.5,ymax=-i+0.5,colors='r')
-            plt.vlines(np.asarray(sss)*100,ymin=-i-0.5,ymax=-i+0.5,colors='b')
-            plt.text(0,-i,sta_code,horizontalalignment='right',bbox=dict(boxstyle="round",fc='white'))
+            #plt.plot(tst.select(component=component)[0].normalize().data - i,'k',linewidth=0.5,alpha=0.6)
+            plt.vlines(np.asarray(pps)*100,ymin=-i*v_offset-0.5,ymax=-i*v_offset+0.5,colors='r')
+            plt.vlines(np.asarray(sss)*100,ymin=-i*v_offset-0.5,ymax=-i*v_offset+0.5,colors='b')
+            #plt.text(0,-i,sta_code,horizontalalignment='right',bbox=dict(boxstyle="round",fc='white'))
         except Exception as e:
             print('no picks for ',sta_code)
 
         if distances:
             temp = str(distances[i])+' km'
-            plt.text(500,-i,temp,fontsize=12)    	
+            plt.text(500,-i*v_offset,temp,fontsize=12)    	
 
     plt.xlim(0,max_len)
     # put markers every ten minutes if the length is appropriate

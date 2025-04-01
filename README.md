@@ -6,6 +6,12 @@ The manuscript is currently under review and this site is under heavy developmen
 > Aguilar and Beroza, Picking Regional Seismic Phase Arrival Times with Deep Learning. under review in Seismica
 
 
+## Installation
+Clone the repository
+
+
+
+
 
 ## Data
 

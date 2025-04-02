@@ -14,7 +14,7 @@ cd skynet
 ```
 Create an enviroment 
 ```
-conda create env -f env.yaml
+conda env create -f env.yaml
 conda activate skynet
 ```
 

@@ -8,8 +8,10 @@ The manuscript is currently under review and this site is under heavy developmen
 
 ## Installation
 Clone the repository
+```
 git clone https://github.com/albertleonardo/skynet.git
 cd skynet
+```
 Create an enviroment 
 conda create env -f env.yaml
 

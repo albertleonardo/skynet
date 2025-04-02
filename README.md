@@ -8,7 +8,7 @@ The manuscript is currently under review and this site is under heavy developmen
 
 ## Installation
 Clone the repository
-```
+```bash
 git clone https://github.com/albertleonardo/skynet.git
 cd skynet
 ```

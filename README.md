@@ -6,7 +6,7 @@ The manuscript is currently under review and this site is under heavy developmen
 > Aguilar Suarez and Beroza, Picking Regional Seismic Phase Arrival Times with Deep Learning. under review in Seismica
 
 
-## Installation
+## Quick Installation
 Clone the repository
 ```bash
 git clone https://github.com/albertleonardo/skynet.git

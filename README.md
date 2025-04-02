@@ -3,11 +3,16 @@
 A series of deep learning models for seismic phase picking at regional distances.
 
 The manuscript is currently under review and this site is under heavy development.
-> Aguilar and Beroza, Picking Regional Seismic Phase Arrival Times with Deep Learning. under review in Seismica
+> Aguilar Suarez and Beroza, Picking Regional Seismic Phase Arrival Times with Deep Learning. under review in Seismica
 
 
 ## Installation
 Clone the repository
+git clone https://github.com/albertleonardo/skynet.git
+cd skynet
+Create an enviroment 
+conda create env -f env.yaml
+
 
 
 

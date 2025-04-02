@@ -13,8 +13,10 @@ git clone https://github.com/albertleonardo/skynet.git
 cd skynet
 ```
 Create an enviroment 
+```
 conda create env -f env.yaml
-
+conda activate skynet
+```
 
 
 

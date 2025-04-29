@@ -67,8 +67,14 @@ def open(fname):
 def load_model(modelname,mode='eval'):
 	if modelname=='regional_picker':
 		model=Regional_Picker(3)
-		model.load_state_dict(torch.load('/Users/albert/Pn/skynet_models/regional_picker',map_location='cpu'))
+		model.load_state_dict(torch.load('skynet_models/regional_picker',map_location='cpu'))
 		model.eval()
+	else:
+		model=Regional_Picker(3)
+		model.load_state_dict(torch.load('skynet_models/regional_picker',map_location='cpu'))
+		model.eval()
+
+
 	return model		
 
 def superposition(examples,delays,scalars=None):

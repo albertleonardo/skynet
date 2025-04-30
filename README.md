@@ -21,6 +21,9 @@ conda activate skynet
 ## Apply to continuous data
 The model can be applied to any waveform in the form of an obspy Stream
 see the notebook tutorial for details on loading a model, and getting picks
+```python
+import skynet
+```
 
 
 

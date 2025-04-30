@@ -2,8 +2,10 @@
 **S**eismological **K**nowledge **Y**ardstick **NET**works
 A series of deep learning models for seismic phase picking at regional distances.
 
-The manuscript is currently under review and this site is under heavy development.
-> Aguilar Suarez and Beroza, Picking Regional Seismic Phase Arrival Times with Deep Learning. under review in Seismica
+The manuscript has just been published! check it out
+[https://seismica.library.mcgill.ca/article/view/1431]
+Aguilar Suarez, A. L., & Beroza, G. (2025). Picking Regional Seismic Phase Arrival Times with Deep Learning. Seismica, 4(1). https://doi.org/10.26443/seismica.v4i1.1431
+
 
 
 ## Quick Installation

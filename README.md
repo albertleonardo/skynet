@@ -30,7 +30,7 @@ model = skynet.load_model('regional_picker')
 
 ## Data
 
-We trained intial models in the CREW dataset, details here: https://github.com/albertleonardo/CREW
+We trained intial models using the CREW dataset, details here: https://github.com/albertleonardo/CREW
 
 The paper is here: https://seismica.library.mcgill.ca/article/view/1049
 

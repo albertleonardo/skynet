@@ -71,7 +71,7 @@ def load_model(modelname,mode='eval'):
 		model.eval()
 	else:
 		model=Regional_Picker(3)
-		model.load_state_dict(torch.load('skynet_models/regional_picker',map_location='cpu'))
+		model.load_state_dict(torch.load(modelname,map_location='cpu'))
 		model.eval()
 
 

@@ -19,8 +19,8 @@ conda activate skynet
 ```
 
 ## Applying to continuous data
-The model can be applied to any waveform in the form of an obspy Stream, allowing many different formats [formats](https://docs.obspy.org/packages/autogen/obspy.core.stream.read.html).
-See [https://github.com/albertleonardo/skynet/skynet_tutorial.ipynb] for details on loading a model, and getting picks
+The model can be applied to any waveform in the form of an obspy Stream, allowing many different [formats](https://docs.obspy.org/packages/autogen/obspy.core.stream.read.html).
+See [tutorial](https://github.com/albertleonardo/skynet/skynet_tutorial.ipynb) for details on loading a model, and getting picks
 ```python
 import skynet
 model = skynet.load_model('regional_picker')

@@ -2,7 +2,7 @@
     "docstring": "",
     "model_args": {
         "sampling_rate": 100,
-        "component_order": "ZNE",
+        "component_order": "ENZ",
         "filter_args": null,
         "filter_kwargs": null,
         "grouping": "instrument",

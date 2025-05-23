@@ -1,0 +1,22 @@
+{
+    "docstring": "",
+    "model_args": {
+        "sampling_rate": 100,
+        "component_order": "ZNE",
+        "filter_args": null,
+        "filter_kwargs": null,
+        "grouping": "instrument",
+        "in_channels": 3,
+        "classes": 5,
+        "phases": [
+            "Pn",
+            "Pg",
+            "Sn",
+            "Sg",
+            "noise"
+        ],
+        "norm": "peak"
+    },
+    "seisbench_requirement": "0.6.1",
+    "default_args": {}
+}

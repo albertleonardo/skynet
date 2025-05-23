@@ -1,0 +1,16 @@
+{
+    "docstring": "",
+    "model_args": {
+        "sampling_rate": 100,
+        "component_order": "ENZ",
+        "filter_args": null,
+        "filter_kwargs": null,
+        "grouping": "instrument",
+        "in_channels": 3,
+        "classes": 3,
+        "phases": "PSN",
+        "norm": "peak"
+    },
+    "seisbench_requirement": "0.6.1",
+    "default_args": {}
+}

@@ -28,6 +28,10 @@ import skynet
 model = skynet.load_model('regional_picker')
 ```
 
+## Seisbench integration
+Models are now available via [Seisbench](https://github.com/seisbench/seisbench)
+
+
 
 
 ## Data

@@ -396,7 +396,10 @@ def plot_example_seisbench(example,filtered=False,polarity=False):
     for i in range(len(traces)):
         #x = np.arange(0,300,0.01)
         plt.plot(traces[i]-i*2,linewidth=0.5,c='k')
-        plt.text(length-1000,-i*2+0.3,example.attrs['channels'][i],bbox=dict(boxstyle="round",fc='white'))#+channels[i])
+        if len(example.attrs['channels'])>1:
+            plt.text(length-1000,-i*2+0.3,example.attrs['channels'][i],bbox=dict(boxstyle="round",fc='white'))#+channels[i])
+        elif len(example.attrs['channels'])==1:
+            plt.text(length-1000,-i*2+0.3,example.attrs['channels'][0],bbox=dict(boxstyle="round",fc='white'))#+channels[i]     )
         #plt.hlines(-3,0,30000)
         #plt.hlines(-1,0,30000)
         
@@ -1371,23 +1374,27 @@ def assemble_augmented_batch(data,n,random=True,label_type='triangle',half_width
     return X,Y,outnames
         
        
-def plot_noise_example(data):
+def plot_noise_example(example,filtered=False):
     """
     plots the data from a noise example
     """ 
-    traces = data
+    traces = example[()]
+    if filtered:
+        traces = bandpass_data(traces,freqmin=1)
+
     fig = plt.figure(figsize=(16,6),tight_layout=True)
     gs  = gridspec.GridSpec(3,4)
     ax = fig.add_subplot(gs[0:2,0:3])
     for i in range(3):
         x = np.arange(0,300,0.01)
-        plt.plot(traces[:,i]-i*2,linewidth=0.5,c='k')
+        plt.plot(traces[i,:]-i*2,linewidth=0.5,c='k')
 
-    plt.xlim(0,30000)
+    
+    plt.xlim(0,traces.shape[1])
     plt.yticks([])
-    plt.xticks(np.arange(0,30001,6000),np.arange(0,301,60))
+    plt.xticks(np.arange(0,traces.shape[1]+1,traces.shape[1]/4),np.arange(0,traces.shape[1]/100 + 1,30))
     plt.xlabel('seconds')
-    plt.title('noise example')
+    plt.title(example.name)
 
     return fig
 
@@ -1646,7 +1653,7 @@ def seisbench_batch_phasenet(dataset,indices,half_width):
 def col_augmentation(metadata,data):
     # gather short distance arrivals
 
-    tdf   = metadata[metadata['path_ep_distance_deg']<0.6]
+    tdf   = metadata[metadata['path_ep_distance_deg']<0.99]
     #print(len(metadata),len(tdf)) 
     tnames = tdf['name'].to_list()
 
@@ -2003,7 +2010,7 @@ def plot_seisbench_example_predictions(example,predictions=False,picks=False,fil
     ax = fig.add_subplot(gs[0:2,0:3])
     for i in range(len(traces)):
         plt.plot(traces[i]-i*2,linewidth=0.5,c='k')
-        plt.text(100,-i*2+0.8,example.attrs['channels'][i],bbox=dict(boxstyle="round",fc='white'))#+channels[i])
+        #plt.text(100,-i*2+0.8,example.attrs['channels'][i],bbox=dict(boxstyle="round",fc='white'))#+channels[i])
 
 
         if example.attrs['trace_p_arrival_sample'] != 0:
@@ -2729,7 +2736,7 @@ def execute(st,model,outname='skynet_picks.csv',threshold=0.5,stack=True,return_
     return df
 
 
-def extract_picks(predictions,threshold=0.5,width=100):
+def extract_picks(predictions,threshold=0.5,width=50):
     """
     Takes the tensor from running the network predictions and extract the peaks, which will be the picks
     """
@@ -3263,17 +3270,20 @@ def plot_picks(st,df,component='Z',sta_order=None,distances=None,figsize=(13,7),
             pass
         try:
             #print('try station ',sta_code)
-            plt.plot(tst.select(component=component)[0].normalize().data - i*v_offset,'k',linewidth=0.5,alpha=0.6)
+            plt.plot(tst.select(component=component)[0].normalize().data - i*v_offset,'k',linewidth=0.5,alpha=0.4)
             plt.text(0,-i*v_offset,sta_code,horizontalalignment='right',fontsize=fontsize,bbox=dict(boxstyle="round",fc='white'))
-
+            #print('going into subsetting') 
             subset_picks = picks[picks['station']==sta_code]
+            #print(subset_picks)
             reftime = tst[0].stats.starttime
+            #print('getting positions')
             pick_positions = [UT(time)- reftime for time in  subset_picks['time'] ]
+            #print('inserting positions')
             subset_picks.insert(2,'positions',pick_positions,True)
-
+            #print('next into subsetting')
             p_picks = subset_picks[subset_picks['phase']=='P']
             s_picks = subset_picks[subset_picks['phase']=='S']
-
+            #print(p_picks)
             pps = p_picks['positions'].to_list()
             sss = s_picks['positions'].to_list()
 
@@ -3284,7 +3294,8 @@ def plot_picks(st,df,component='Z',sta_order=None,distances=None,figsize=(13,7),
         except Exception as e:
             print('no picks for ',sta_code)
 
-        if distances:
+        #if len(distances)>1:
+        if distances: 
             temp = str(distances[i])+' km'
             plt.text(500,-i*v_offset,temp,fontsize=12)    	
 
@@ -3504,7 +3515,7 @@ def adjust_times(time):
 
 
 def plot_skynet_preds(st,model,filtered=False,outname=None,
-                         sta_order=None,amp_level=1,xlims=(0,30000),sta_names=True,
+                         sta_order=None,amp_level=1,xlims=(0,30000),data_len=30000,sta_names=True,
                          associations=None,plot_picks=False,figsize=(12,8),v_offset=1,distances=None):
     
     # There is an offset in phasenet predictions careful
@@ -3522,7 +3533,7 @@ def plot_skynet_preds(st,model,filtered=False,outname=None,
     for station in stations:
         tst = st.select(station=station)
         tst=tst.sort()
-        preds=predict_from_stream(tst,model).detach().numpy()
+        preds=predict_from_stream(tst,model,data_len=data_len,stack=True)#.detach().numpy()
         picks=extract_picks(preds)
         #pn_preds=pn_model.annotate(tst)
         
@@ -3565,8 +3576,8 @@ def plot_skynet_preds(st,model,filtered=False,outname=None,
             plt.text(300,-i+0.1,temp,fontsize=14)
             counter+=1
         if i==v_offset:
-            plt.plot(skynet_pred[0,0,:]-i,'r',label='SKYNET P')
-            plt.plot(skynet_pred[0,1,:]-i,'b',label='SKYNET S')
+            plt.plot(skynet_pred[0,:]-i,'r',label='SKYNET P')
+            plt.plot(skynet_pred[1,:]-i,'b',label='SKYNET S')
             # need to apply the offset
             
             #plt.plot(np.arange(0,len(pn_pred[1].data))+offset,pn_pred[1].data-i,c=pc,label='PhaseNet P',lw=2)
@@ -3588,8 +3599,9 @@ def plot_skynet_preds(st,model,filtered=False,outname=None,
                     g=0
             
         else:
-            plt.plot(skynet_pred[0,0,:]-i,'r',label='')
-            plt.plot(skynet_pred[0,1,:]-i,'b',label='')
+            print(skynet_pred.shape)
+            plt.plot(skynet_pred[0,:]-i,'r',label='')
+            plt.plot(skynet_pred[1,:]-i,'b',label='')
             #plt.plot(np.arange(0,len(pn_pred[1].data))+offset,pn_pred[1].data-i,c=pc,label='',lw=2)
             #plt.plot(np.arange(0,len(pn_pred[2].data))+offset,pn_pred[2].data-i,c=sc,label='',lw=2)    
             
@@ -3611,9 +3623,9 @@ def plot_skynet_preds(st,model,filtered=False,outname=None,
 
 
     plt.yticks([])
-    plt.xticks(np.arange(0,30001,3000),np.arange(0,301,30))
+    #plt.xticks(np.arange(0,30001,3000),np.arange(0,301,30))
     
-    plt.xlim(xlims)
+    #plt.xlim(xlims)
     plt.legend(ncol=4,loc='lower center')
     
     xstr = 'Seconds after '+str(st[0].stats.starttime)
@@ -3624,6 +3636,75 @@ def plot_skynet_preds(st,model,filtered=False,outname=None,
     
     if outname is not None:
         plt.savefig(outname)
+
+
+def plot_event(event,st,pre_len=30,pos_len=90,offset=0,component='Z',bandpass=False):
+    """
+    plots the waveforms and the picks from an event 
+    :type st: obspy.Stream
+    :param st: waveforms to plot
+
+    :type event: obspy.core.Event   
+    :param event: event containing the origin and the picks
+    
+    :type pre_len: float
+    :param pre_len: time before origin time to start the plot
+
+    :type pos_len: float
+    :param pos_len: time after origin time to end the plot
+
+    :type offset: float
+    :param offset: offset time to make the event look better
+
+    :type component: str
+    :param component: which component to display the waveforms for
+
+    """
+    for tr in st:
+        tr.stats.sampling_rate = int(np.round(tr.stats.sampling_rate))
+    if bandpass:
+        st = st.detrend('demean')
+        st = st.filter('bandpass',freqmin=1,freqmax=20)
+        st = st.detrend('demean')
+        
+
+    reftime = event.origins[0].time
+    tst     = st.slice(starttime=reftime-pre_len,endtime=reftime+pos_len)
+
+    tst = tst.select(component=component)
+
+    fig=plt.figure(figsize=(12,8))
+    for i,tr in enumerate(tst):
+        # find the picks that correspond to this event
+        ppick = None
+        spick = None
+        for pick in event.picks:
+            if pick.waveform_id.station_code==tr.stats.station:
+                if pick.phase_hint=='P':
+                    ppick = pick
+                elif pick.phase_hint=='S':
+                    spick = pick
+        if ppick:
+            ppos = (ppick.time - reftime)+pre_len
+        if spick:
+            spos = (spick.time - reftime)+pre_len
+ 
+            print(tr.stats.station,ppick,spick,ppos,spos)
+        tx = np.arange(0,len(tr.data)/tr.stats.sampling_rate,tr.stats.delta)
+        plt.plot(tx,tr.detrend('demean').normalize().data-i,c='gray',lw=0.25)
+
+        if ppick:
+            plt.vlines(ppos,ymin=-i-0.5,ymax=-i+0.5,color='r')
+        if spick:
+            plt.vlines(spos,ymin=-i-0.5,ymax=-i+0.5,color='b')
+
+
+
+    return fig
+
+    
+
+
 
 ################MODELS########################    
 class Long_PhaseNet(nn.Module):
